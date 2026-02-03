@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 #
-# This scripts sets up the environment for developers. Just execute it.
+# This script sets up the environment for developers. Just execute it.
 
 # Make sure we are being executed
 if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
