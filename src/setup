@@ -45,7 +45,7 @@ setup_dependencies() {
 }
 
 setup_host() {
-  if ! config_load "${BAAL_ROOT}/data/local.env"; then
+  if ! config_load "${BAAL_ROOT}/.config/local.env"; then
     logError "Failed to load local configuration"
     return 1
   fi
@@ -56,6 +56,12 @@ setup_host() {
     return 1
   fi
 
+  # Configure hostname
+  if ! hostname_configure "${BAAL_NAME}"; then
+    logError "Failed to configure hostname"
+    return 1
+  fi
+
   # Add additional host configuration here
 
   return 0
@@ -63,13 +69,13 @@ setup_host() {
 
 check_system() {
   local name
-  if [[ -z "${BAAL_NAME}" ]]; then
-    logError "BAAL_NAME is not set"
+  if [[ -z "${BAAL_MOTHERBOARD}" ]]; then
+    logError "BAAL_MOTHERBOARD is not set"
     return 1
   fi
 
   if id_identify name; then
-    if [[ "${name}" == "${BAAL_NAME}" ]]; then
+    if [[ "${name}" == "${BAAL_MOTHERBOARD}" ]]; then
       return 0
     fi
   fi
@@ -146,12 +152,14 @@ if ! source "${PREFIX}/lib/slf4.sh"; then
   exit 1
 elif ! source "${PREFIX}/lib/config.sh"; then
   logFatal "Failed to import config.sh"
-elif ! config_load "${BAAL_ROOT}/data/local.env"; then
+elif ! config_load "${BAAL_ROOT}/.config/local.env"; then
   logFatal "Failed to load local.env"
 elif [[ -z "${SETUP_DIR}" ]]; then
   logFatal "SETUP_DIR is not set"
 elif ! source "${SETUP_DIR}/src/git.sh"; then
   logFatal "Failed to import git.sh"
+elif ! source "${SETUP_DIR}/src/hostname.sh"; then
+  logFatal "Failed to import hostname.sh"
 elif ! source "${SETUP_DIR}/src/identity.sh"; then
   logFatal "Failed to import identity"
 fi

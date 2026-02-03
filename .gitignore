@@ -1,3 +1,5 @@
+.config/ssh_init.sh
+
 # Log files
 .log/
 
