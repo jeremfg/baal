@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 #
-# This script is used to configure the Ba'al machine
+# This script is used to configure the Ba'al machine and developer environment
 #
 # Currently tested on Linux Mint (Ubuntu-based)
 
@@ -16,11 +16,64 @@ setup() {
     return 1
   fi
 
+  if ! setup_dev; then
+    logError "Failed to setup developer environment"
+    return 1
+  fi
+
   if [[ ${REBOOT_REQUIRED} -eq 1 ]]; then
     logInfo "Rebooting..."
     shutdown -r now
   fi
 
+  return 0
+}
+
+setup_dev() {
+  logInfo "Setting up developer environment..."
+
+  # Install git
+  if ! pkg_install git; then
+    logError "Failed to install git"
+    return 1
+  fi
+
+  # Install python and pip
+  if ! python_install; then
+    logError "Failed to install python"
+    return 1
+  fi
+
+  # Install nodejs to avoid nodeenv issues with pre-commit
+  if ! pkg_install nodejs npm; then
+    logError "Failed to install nodejs"
+    return 1
+  fi
+
+  # Install pre-commit
+  if ! pkg_install pre-commit; then
+    logError "Failed to install pre-commit"
+    return 1
+  fi
+
+  # Check if pre-commit is already installed
+  if [[ ! -f "${BAAL_ROOT}/.git/hooks/pre-commit" ]]; then
+    logInfo "Configuring pre-commit..."
+    pushd "${BAAL_ROOT}" &>/dev/null || return 1
+    if ! pre-commit install; then
+      logError "Failed to configure pre-commit"
+      return 1
+    fi
+    popd &>/dev/null || return 1
+  fi
+
+  # Install shellcheck
+  if ! pkg_install shellcheck; then
+    logError "Failed to install shellcheck"
+    return 1
+  fi
+
+  logInfo "Dev environment setup successfully"
   return 0
 }
 
@@ -48,16 +101,13 @@ setup_host() {
   if ! config_load "${BAAL_ROOT}/.config/local.env"; then
     logError "Failed to load local configuration"
     return 1
-  fi
-
-  # Make sure we are executing on the right system
-  if ! check_system; then
+  elif ! check_system; then
     logError "This script is not supported on this system"
     return 1
-  fi
-
-  # Configure hostname
-  if ! hostname_configure "${BAAL_NAME}"; then
+  elif [[ -z "${BAAL_NAME}" ]]; then
+    logError "BAAL_NAME is not set"
+    return 1
+  elif ! hostname_configure "${BAAL_NAME}"; then
     logError "Failed to configure hostname"
     return 1
   fi
@@ -162,12 +212,16 @@ elif ! source "${SETUP_DIR}/src/hostname.sh"; then
   logFatal "Failed to import hostname.sh"
 elif ! source "${SETUP_DIR}/src/identity.sh"; then
   logFatal "Failed to import identity"
+elif ! source "${SETUP_DIR}/src/pkg.sh"; then
+  logFatal "Failed to import pkg.sh"
+elif ! source "${SETUP_DIR}/src/python.sh"; then
+  logFatal "Failed to import python.sh"
 fi
 
 if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
   # This script was piped
-  setup "${@}"
-  exit $?
+  echo "ERROR: This script cannot be piped"
+  exit 1
 elif [[ ${BASH_SOURCE[0]} != "${0}" ]]; then
   # This script was sourced
   logFatal "This script cannot be sourced"
