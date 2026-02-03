@@ -41,30 +41,10 @@ if ! command -v git &>/dev/null; then
   echo "Git installed successfully"
 fi
 
-# Install python3
-if ! command -v python3 &>/dev/null; then
-  echo "Installing python3..."
-  if ! sudo apt-get install -y python3; then
-    echo "Failed to install python3"
-    exit 1
-  fi
-  echo "Python3 installed successfully"
-fi
-
-# Install pip
-if ! command -v pip3 &>/dev/null; then
-  echo "Installing pip3..."
-  if ! sudo apt-get install -y python3-pip; then
-    echo "Failed to install pip3"
-    exit 1
-  fi
-  echo "Pip3 installed successfully"
-fi
-
 # Install pre-commit
 if ! command -v pre-commit &>/dev/null; then
   echo "Installing pre-commit..."
-  if ! pip3 install pre-commit; then
+  if ! sudo apt-get install -y pre-commit; then
     echo "Failed to install pre-commit"
     exit 1
   fi

@@ -5,9 +5,7 @@ repos:
     hooks:
       - id: check-added-large-files
         args: ['--maxkb=512']
-      - id: check-ast  # Python
       - id: check-case-conflict
-      - id: check-docstring-first  # Python
       - id: check-executables-have-shebangs  # Shell
       - id: check-shebang-scripts-are-executable  # Shell
       - id: check-merge-conflict
@@ -21,7 +19,6 @@ repos:
       - id: forbid-new-submodules
       - id: mixed-line-ending
         args: ['--fix=lf']
-      - id: requirements-txt-fixer  # Python
       - id: sort-simple-yaml  # YAML
       - id: trailing-whitespace
   - repo: https://github.com/scop/pre-commit-shfmt
@@ -51,10 +48,6 @@ repos:
     hooks:
       - id: forbid-crlf
       - id: forbid-tabs
-  - repo: https://github.com/asottile/pyupgrade
-    rev: v3.19.1
-    hooks:
-      - id: pyupgrade  # Python
   - repo: https://github.com/adrienverge/yamllint.git
     rev: v1.35.1  # Latest version from adrien
     hooks:
@@ -64,13 +57,6 @@ repos:
     rev: v0.14.0  # Latest version from Google
     hooks:
       - id: yamlfmt  # YAML
-  - repo: https://github.com/klen/pylama
-    rev: 8.4.1
-    hooks:
-      - id: pylama  # Python
-        additional_dependencies:
-          - setuptools
-        args: [-o, .pylama.ini]
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
     rev: v2.14.0  # Latest version from macisamuele
     hooks:
