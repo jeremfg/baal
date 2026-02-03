@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
+# This script is used to configure the Ba'al machine
+#
+# Currently tested on Linux Mint (Ubuntu-based)
+
+setup() {
+  if ! setup_dependencies; then
+    logError "Failed to setup dependencies"
+    return 1
+  fi
+
+  if ! setup_host; then
+    logError "Failed to setup host"
+    return 1
+  fi
+
+  if [[ ${REBOOT_REQUIRED} -eq 1 ]]; then
+    logInfo "Rebooting..."
+    shutdown -r now
+  fi
+
+  return 0
+}
+
+setup_dependencies() {
+  # Make sure the OS is up to date
+  if ! sudo apt-get update && sudo apt-get upgrade -y; then
+    logInfo "Failed to update"
+    return 1
+  fi
+
+  # Make sure git is installed and configured
+  if ! git_install; then
+    logInfo "Failed to install git"
+    return 1
+  fi
+  if ! git_configure "${BAAL_ROOT}"; then
+    logInfo "Failed to configure git"
+    return 1
+  fi
+
+  return 0
+}
+
+setup_host() {
+  if ! config_load "${BAAL_ROOT}/data/local.env"; then
+    logError "Failed to load local configuration"
+    return 1
+  fi
+
+  # Make sure we are executing on the right system
+  if ! check_system; then
+    logError "This script is not supported on this system"
+    return 1
+  fi
+
+  # Add additional host configuration here
+
+  return 0
+}
+
+check_system() {
+  local name
+  if [[ -z "${BAAL_NAME}" ]]; then
+    logError "BAAL_NAME is not set"
+    return 1
+  fi
+
+  if id_identify name; then
+    if [[ "${name}" == "${BAAL_NAME}" ]]; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+external_depends() {
+  if ! command -v bpkg &>/dev/null; then
+    # shellcheck disable=SC2312
+    if ! curl -sLo- https://get.bpkg.sh | bash; then
+      echo "Failed to install bpkg"
+      return 1
+    fi
+  fi
+
+  if [[ ! -f "${PREFIX}/lib/slf4.sh" ]]; then
+    if ! bpkg install -g jeremfg/slf4.sh; then
+      echo "Failed to install slf4.sh"
+      return 1
+    fi
+  fi
+
+  if [[ ! -f "${PREFIX}/lib/config.sh" ]]; then
+    if ! bpkg install -g jeremfg/config.sh; then
+      echo "Failed to install config.sh"
+      return 1
+    fi
+  fi
+}
+
+# Variables loaded externally
+if [[ -z "${LEVEL_ALL}" ]]; then LEVEL_ALL=""; fi
+
+# Constants
+REBOOT_REQUIRED=0
+
+###########################
+###### Startup logic ######
+###########################
+
+# Get directory of this script
+# https://stackoverflow.com/a/246128
+BAAL_SOURCE=${BASH_SOURCE[0]}
+while [[ -L "${BAAL_SOURCE}" ]]; do # resolve $BAAL_SOURCE until the file is no longer a symlink
+  BAAL_ROOT=$(cd -P "$(dirname "${BAAL_SOURCE}")" >/dev/null 2>&1 && pwd)
+  BAAL_SOURCE=$(readlink "${BAAL_SOURCE}")
+  [[ ${BAAL_SOURCE} != /* ]] && BAAL_SOURCE=${BAAL_ROOT}/${BAAL_SOURCE} # if $BAAL_SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+BAAL_ROOT=$(cd -P "$(dirname "${BAAL_SOURCE}")" >/dev/null 2>&1 && pwd)
+BAAL_ROOT=$(realpath "${BAAL_ROOT}/..")
+
+# Determine BPKG's global prefix
+if [[ -z "${PREFIX}" ]]; then
+  if [[ $(id -u || true) -eq 0 ]]; then
+    PREFIX="/usr/local"
+  else
+    PREFIX="${HOME}/.local"
+  fi
+fi
+
+# Install external dependencies
+if ! external_depends; then
+  exit 1
+fi
+
+# Configure logger
+export LOG_CONSOLE=1
+export LOG_LEVEL=0
+
+# shellcheck disable=SC1091
+if ! source "${PREFIX}/lib/slf4.sh"; then
+  echo "Failed to import slf4.sh"
+  exit 1
+elif ! source "${PREFIX}/lib/config.sh"; then
+  logFatal "Failed to import config.sh"
+elif ! config_load "${BAAL_ROOT}/data/local.env"; then
+  logFatal "Failed to load local.env"
+elif [[ -z "${SETUP_DIR}" ]]; then
+  logFatal "SETUP_DIR is not set"
+elif ! source "${SETUP_DIR}/src/git.sh"; then
+  logFatal "Failed to import git.sh"
+elif ! source "${SETUP_DIR}/src/identity.sh"; then
+  logFatal "Failed to import identity"
+fi
+
+if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
+  # This script was piped
+  setup "${@}"
+  exit $?
+elif [[ ${BASH_SOURCE[0]} != "${0}" ]]; then
+  # This script was sourced
+  logFatal "This script cannot be sourced"
+else
+  # This script was executed
+  setup "${@}"
+  exit $?
+fi
