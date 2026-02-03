@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.autopep8",
+    "timonwong.shellcheck",
+    "foxundermoon.shell-format",
+    "editorconfig.editorconfig"
+  ]
+}
