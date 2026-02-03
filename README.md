@@ -18,4 +18,4 @@ To set up the development environment, run:
 ./tool/setup
 ```
 
-This will install all necessary dependencies including git, python3, pre-commit hooks, and shellcheck.
+This will install all necessary dependencies including git, pre-commit hooks, and shellcheck.
