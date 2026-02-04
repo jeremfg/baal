@@ -73,6 +73,12 @@ setup_dev() {
     return 1
   fi
 
+  # Install Docker Desktop
+  if ! docker_install; then
+    logError "Failed to install Docker Desktop"
+    return 1
+  fi
+
   logInfo "Dev environment setup successfully"
   return 0
 }
@@ -216,6 +222,8 @@ elif ! source "${SETUP_DIR}/src/pkg.sh"; then
   logFatal "Failed to import pkg.sh"
 elif ! source "${SETUP_DIR}/src/python.sh"; then
   logFatal "Failed to import python.sh"
+elif ! source "${SETUP_DIR}/src/docker.sh"; then
+  logFatal "Failed to import docker.sh"
 fi
 
 if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
