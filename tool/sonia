@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
+# Monitor when Sonia server comes back online by pinging and checking DNS
+
+set -euo pipefail
+
+############################################
+## Configuration
+############################################
+
+DOMAIN="sonia.jeremfg.com"
+BACK_IP="38.133.38.85"
+DNS_SERVER="198.54.117.10" # Namecheap DNS
+INTERVAL=5
+
+############################################
+## Functions
+############################################
+
+main() {
+  logInfo "Monitoring ${DOMAIN} using Namecheap DNS (${DNS_SERVER})"
+  logInfo "Press Ctrl+C to stop"
+  echo
+
+  while true; do
+    local now
+    now="$(date '+%Y-%m-%d %H:%M:%S')"
+
+    # Query DNS directly, bypassing cache
+    local ip
+    ip="$(dig +short @"${DNS_SERVER}" "${DOMAIN}" | head -n 1)"
+
+    if [[ -z "${ip}" ]]; then
+      logWarn "DNS lookup failed. Using backup IP: ${BACK_IP}"
+      ip="${BACK_IP}"
+    fi
+
+    # Ping once, wait max 1 second
+    if ping -c 1 -W 1 "${ip}" &>/dev/null; then
+      logInfo "${ip} ONLINE"
+      logInfo "Server came back online at ${now}"
+      break
+    else
+      echo "[${now}] ${ip} OFFLINE"
+    fi
+
+    sleep "${INTERVAL}"
+  done
+}
+
+###########################
+###### Startup logic ######
+###########################
+
+# Get directory of this script
+SN_SOURCE=${BASH_SOURCE[0]}
+while [[ -L "${SN_SOURCE}" ]]; do
+  SN_ROOT=$(cd -P "$(dirname "${SN_SOURCE}")" >/dev/null 2>&1 && pwd)
+  SN_SOURCE=$(readlink "${SN_SOURCE}")
+  [[ ${SN_SOURCE} != /* ]] && SN_SOURCE=${SN_ROOT}/${SN_SOURCE}
+done
+SN_ROOT=$(cd -P "$(dirname "${SN_SOURCE}")" >/dev/null 2>&1 && pwd)
+SN_ROOT=$(realpath "${SN_ROOT}/..")
+
+# Determine BPKG's global prefix
+if [[ -z "${PREFIX:-}" ]]; then
+  if [[ $(id -u || true) -eq 0 ]]; then
+    PREFIX="/usr/local"
+  else
+    PREFIX="${HOME}/.local"
+  fi
+fi
+
+# Import dependencies
+# shellcheck disable=SC1091 # Library paths are dynamically determined at runtime
+if ! source "${PREFIX}/lib/slf4.sh"; then
+  echo "Failed to import slf4.sh"
+  exit 1
+fi
+
+if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
+  # This script was piped
+  logFatal "This script cannot be piped"
+elif [[ ${BASH_SOURCE[0]} != "${0}" ]]; then
+  # This script was sourced
+  logFatal "This script cannot be sourced"
+else
+  # This script was executed
+  main "$@"
+  exit $?
+fi

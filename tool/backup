@@ -1,0 +1,250 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
+# Backup Viofo dashcam footage to remote SMB share using rclone
+
+set -euo pipefail
+
+############################################
+## Configuration
+############################################
+
+# Local source directory (no trailing slash)
+SRC="/mnt/tb/Viofo/Movie"
+
+# Remote SMB connection details
+SMB_HOST="halley.demers.jeremfg.com"
+SMB_SHARE="Group"
+SMB_DOMAIN="SOL"
+SMB_USER="Jeremie"
+# SMB_PASSWORD loaded from local.env
+
+# Remote path within the share
+REMOTE_PATH="Group/Family/Photos/Voyages/2025 - Terre Neuve et Labrador/Viofo/Movie"
+
+# Performance and retry tuning defaults
+DEFAULT_BWLIMIT="0"
+DEFAULT_TRANSFERS=4
+CHECKERS=8
+TIMEOUT="60s"
+RETRIES=10
+RETRIES_SLEEP="30s"
+
+############################################
+## Functions
+############################################
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Backup Viofo dashcam footage to remote SMB share using rclone.
+
+OPTIONS:
+  -n, --dry-run         Preview changes without modifying remote
+  -s, --src PATH        Source directory (default: ${SRC})
+  -r, --remote PATH     Remote path within share (default: ${REMOTE_PATH})
+  -b, --bwlimit LIMIT   Bandwidth limit (default: ${DEFAULT_BWLIMIT})
+  -t, --transfers NUM   Number of parallel transfers (default: ${DEFAULT_TRANSFERS})
+  -h, --help            Display this help message
+
+EXAMPLES:
+  $(basename "$0")                    # Sync with default settings
+  $(basename "$0") --dry-run          # Preview sync without changes
+  $(basename "$0") -s /custom/path    # Sync custom source directory
+  $(basename "$0") -b 10M             # Limit bandwidth to 10MB/s
+
+EOF
+}
+
+parse_args() {
+  # Set globals with defaults
+  DRY_RUN=false
+  OPT_SRC="${SRC}"
+  OPT_REMOTE_PATH="${REMOTE_PATH}"
+  OPT_BWLIMIT="${DEFAULT_BWLIMIT}"
+  OPT_TRANSFERS=${DEFAULT_TRANSFERS}
+
+  # Parse options using getopt
+  local options
+  if ! options=$(getopt -o hns:r:b:t: -l help,dry-run,src:,remote:,bwlimit:,transfers: -- "$@"); then
+    usage
+    exit 1
+  fi
+  eval set -- "${options}"
+
+  while true; do
+    case "$1" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -n | --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    -s | --src)
+      OPT_SRC="$2"
+      shift 2
+      ;;
+    -r | --remote)
+      OPT_REMOTE_PATH="$2"
+      shift 2
+      ;;
+    -b | --bwlimit)
+      OPT_BWLIMIT="$2"
+      shift 2
+      ;;
+    -t | --transfers)
+      OPT_TRANSFERS="$2"
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      logError "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+    esac
+  done
+}
+
+main() {
+  # Parse arguments (sets globals)
+  parse_args "$@"
+
+  if ${DRY_RUN}; then
+    logWarn "Running in DRY-RUN mode"
+  fi
+
+  # Dependency check
+  if ! command -v rclone >/dev/null 2>&1; then
+    logFatal "rclone is not installed or not in PATH"
+  fi
+
+  # Validate SMB_PASSWORD is set
+  if [[ -z "${SMB_PASSWORD:-}" ]]; then
+    logFatal "SMB_PASSWORD is not set in local.env"
+  fi
+
+  # Setup rclone-specific logging (not for slf4.sh)
+  local timestamp
+  timestamp="$(date -u '+%Y%m%d_%H%M%S')"
+  local log_dir="${BK_ROOT}/.log/rclone-offsite"
+  mkdir -p "${log_dir}"
+  local log_file="${log_dir}/rclone_sync_${timestamp}.log"
+  local log_level="INFO"
+
+  # Create a temporary config file
+  local rclone_temp_conf
+  rclone_temp_conf="$(mktemp)"
+  chmod 600 "${rclone_temp_conf}"
+
+  # Obscure the password
+  local obscured_password
+  obscured_password=$(rclone obscure "${SMB_PASSWORD}")
+
+  # Write remote config into temp file
+  cat >"${rclone_temp_conf}" <<EOF
+[sonia-smb]
+type = smb
+host = ${SMB_HOST}
+user = ${SMB_USER}
+pass = ${obscured_password}
+domain = ${SMB_DOMAIN}
+share = ${SMB_SHARE}
+EOF
+
+  # Build rclone command
+  local cmd=(
+    rclone sync
+    "${OPT_SRC}"
+    "sonia-smb:${OPT_REMOTE_PATH}"
+    --config="${rclone_temp_conf}"
+    --transfers="${OPT_TRANSFERS}"
+    --checkers="${CHECKERS}"
+    --bwlimit="${OPT_BWLIMIT}"
+    --timeout="${TIMEOUT}"
+    --log-file="${log_file}"
+    --log-level="${log_level}"
+    --retries="${RETRIES}"
+    --retries-sleep="${RETRIES_SLEEP}"
+    --progress
+  )
+
+  # Add dry-run flag if enabled
+  ${DRY_RUN} && cmd+=("--dry-run")
+
+  # Run the sync
+  logInfo "Starting rclone sync..."
+  "${cmd[@]}"
+  local rc=$?
+
+  # Log result
+  if [[ ${rc} -eq 0 ]]; then
+    logInfo "Sync completed successfully"
+  else
+    logError "Sync failed with exit code ${rc}"
+  fi
+
+  # Maintain symlink to latest log
+  ln -sf "${log_file}" "${log_dir}/latest.log"
+
+  # Clean up
+  rm -f "${rclone_temp_conf}"
+
+  return "${rc}"
+}
+
+###########################
+###### Startup logic ######
+###########################
+
+# Get directory of this script
+BK_SOURCE=${BASH_SOURCE[0]}
+while [[ -L "${BK_SOURCE}" ]]; do
+  BK_ROOT=$(cd -P "$(dirname "${BK_SOURCE}")" >/dev/null 2>&1 && pwd)
+  BK_SOURCE=$(readlink "${BK_SOURCE}")
+  [[ ${BK_SOURCE} != /* ]] && BK_SOURCE=${BK_ROOT}/${BK_SOURCE}
+done
+BK_ROOT=$(cd -P "$(dirname "${BK_SOURCE}")" >/dev/null 2>&1 && pwd)
+BK_ROOT=$(realpath "${BK_ROOT}/..")
+
+# Determine BPKG's global prefix
+if [[ -z "${PREFIX:-}" ]]; then
+  if [[ $(id -u || true) -eq 0 ]]; then
+    PREFIX="/usr/local"
+  else
+    PREFIX="${HOME}/.local"
+  fi
+fi
+
+# Import dependencies
+# shellcheck disable=SC1091 # Library paths are dynamically determined at runtime
+if ! source "${PREFIX}/lib/slf4.sh"; then
+  echo "Failed to import slf4.sh"
+  exit 1
+elif ! source "${PREFIX}/lib/config.sh"; then
+  logFatal "Failed to import config.sh"
+fi
+
+# Load configuration (config_load automatically handles SOPS decryption)
+CONFIG_DIR="${BK_ROOT}/.config"
+if ! config_load "${CONFIG_DIR}/local.env"; then
+  logFatal "Failed to load local.env configuration"
+fi
+
+if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
+  # This script was piped
+  logFatal "This script cannot be piped"
+elif [[ ${BASH_SOURCE[0]} != "${0}" ]]; then
+  # This script was sourced
+  logFatal "This script cannot be sourced"
+else
+  # This script was executed
+  main "$@"
+  exit $?
+fi

@@ -1,0 +1,351 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
+# Connect to Android phones via ADB and start scrcpy
+
+set -euo pipefail
+
+############################################
+## Configuration
+############################################
+
+# Default scrcpy options
+DEFAULT_MAX_SIZE=1024
+DEFAULT_BITRATE="500K"
+DEFAULT_FPS=10
+
+# Phone configurations: name|dns|port|serial|orientation
+declare -A PHONES=(
+  ["fairphone5"]="Fairphone 5|Fairphone-5.demers.jeremfg.com|5555|5e2e5b90|90"
+  ["nexus4"]="Nexus 4|Nexus-4.demers.jeremfg.com|5555|04206409c6000c4c|0"
+  ["nexus5x"]="Nexus 5X|Nexus-5X.demers.jeremfg.com|5555|02613c126754caee|0"
+  ["oneplus7pro"]="OnePlus 7 Pro|OnePlus-7-Pro.demers.jeremfg.com|5555||90"
+)
+
+############################################
+## Functions
+############################################
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") COMMAND [PHONE] [OPTIONS]
+
+Connect to Android phones via ADB and start scrcpy screen mirroring.
+
+COMMANDS:
+  start      Connect and start scrcpy (default)
+  stop       Stop scrcpy and disconnect ADB
+  list       List available phones
+  status     Show ADB connection status
+
+PHONE:
+  fairphone5      Fairphone 5
+  nexus4          Nexus 4
+  nexus5x         Nexus 5X
+  oneplus7pro     OnePlus 7 Pro
+
+  If no phone is specified with start, an interactive menu will be displayed.
+
+OPTIONS:
+  -s, --max-size SIZE      Maximum screen size (default: ${DEFAULT_MAX_SIZE})
+  -b, --bitrate RATE       Video bit rate (default: ${DEFAULT_BITRATE})
+  -f, --fps FPS            Maximum frames per second (default: ${DEFAULT_FPS})
+  -o, --orientation DEG    Display orientation (overrides phone default)
+  -a, --no-audio          Disable audio streaming
+  -h, --help               Display this help message
+
+EXAMPLES:
+  $(basename "$0") start                        # Interactive menu
+  $(basename "$0") start fairphone5             # Connect to Fairphone 5
+  $(basename "$0") start nexus4 -s 1920 -f 30   # Higher quality
+  $(basename "$0") stop                         # Disconnect all devices
+  $(basename "$0") list                         # Show available phones
+  $(basename "$0") status                       # Show connection status
+
+EOF
+}
+
+list_phones() {
+  echo "Available phones:"
+  echo
+  local i=1
+  for key in "${!PHONES[@]}"; do
+    IFS='|' read -r name _dns _port _serial _orientation <<<"${PHONES[${key}]}"
+    echo "  ${i}. ${name} (${key})"
+    ((i++))
+  done
+  echo
+}
+
+select_phone_interactive() {
+  list_phones
+
+  local choice
+  read -r -p "Select a phone (1-${#PHONES[@]}): " choice
+
+  if ! [[ "${choice}" =~ ^[0-9]+$ ]] || [[ "${choice}" -lt 1 ]] || [[ "${choice}" -gt ${#PHONES[@]} ]]; then
+    logFatal "Invalid selection: ${choice}"
+  fi
+
+  # Get the phone key by index
+  local keys=("${!PHONES[@]}")
+  SELECTED_PHONE="${keys[$((choice - 1))]}"
+}
+
+parse_args() {
+  # Set globals with defaults
+  COMMAND="start"
+  SELECTED_PHONE=""
+  OPT_MAX_SIZE=${DEFAULT_MAX_SIZE}
+  OPT_BITRATE="${DEFAULT_BITRATE}"
+  OPT_FPS=${DEFAULT_FPS}
+  OPT_ORIENTATION=""
+  OPT_NO_AUDIO=false
+
+  # Handle help before other parsing
+  if [[ $# -gt 0 && ("$1" == "-h" || "$1" == "--help") ]]; then
+    usage
+    exit 0
+  fi
+
+  # Check if first argument is a command
+  if [[ $# -gt 0 && "${1:0:1}" != "-" ]]; then
+    case "$1" in
+    start | stop | list | status)
+      COMMAND="$1"
+      shift
+      ;;
+    *)
+      echo "Unknown command: $1"
+      usage
+      exit 1
+      ;;
+    esac
+  fi
+
+  # For start command, check if second argument is a phone name
+  if [[ "${COMMAND}" == "start" && $# -gt 0 && "${1:0:1}" != "-" ]]; then
+    if [[ -n "${PHONES[$1]:-}" ]]; then
+      SELECTED_PHONE="$1"
+      shift
+    fi
+  fi
+
+  # Parse options using getopt (only applicable for start command)
+  if [[ "${COMMAND}" == "start" ]]; then
+    local options
+    if ! options=$(getopt -o hs:b:f:o:a -l help,max-size:,bitrate:,fps:,orientation:,no-audio -- "$@"); then
+      usage
+      exit 1
+    fi
+    eval set -- "${options}"
+
+    while true; do
+      case "$1" in
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      -s | --max-size)
+        OPT_MAX_SIZE="$2"
+        shift 2
+        ;;
+      -b | --bitrate)
+        OPT_BITRATE="$2"
+        shift 2
+        ;;
+      -f | --fps)
+        OPT_FPS="$2"
+        shift 2
+        ;;
+      -o | --orientation)
+        OPT_ORIENTATION="$2"
+        shift 2
+        ;;
+      -a | --no-audio)
+        OPT_NO_AUDIO=true
+        shift
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        logError "Unknown option: $1"
+        usage
+        exit 1
+        ;;
+      esac
+    done
+  fi
+}
+
+stop_devices() {
+  logInfo "Stopping scrcpy and disconnecting ADB devices..."
+
+  # Kill scrcpy processes
+  if pgrep -x scrcpy >/dev/null; then
+    logInfo "Stopping scrcpy..."
+    pkill -x scrcpy
+  else
+    logTrace "No scrcpy processes running"
+  fi
+
+  # Disconnect all ADB devices
+  if command -v adb >/dev/null 2>&1; then
+    local connected_devices
+    connected_devices=$(adb devices | grep -v "List of devices" | grep -c -v "^$" || echo "0")
+
+    if [[ "${connected_devices}" -gt 0 ]]; then
+      logInfo "Disconnecting ADB devices..."
+      adb disconnect
+    else
+      logTrace "No ADB devices connected"
+    fi
+  fi
+
+  logInfo "All devices stopped"
+}
+
+show_status() {
+  logInfo "ADB connection status:"
+  echo
+
+  if ! command -v adb >/dev/null 2>&1; then
+    logError "adb not found"
+    return 1
+  fi
+
+  adb devices -l
+  echo
+
+  if pgrep -x scrcpy >/dev/null; then
+    local pids
+    pids=$(pgrep -x scrcpy || true)
+    logInfo "scrcpy is running (PID: $(echo "${pids}" | tr '\n' ' ' || true))"
+  else
+    logInfo "scrcpy is not running"
+  fi
+}
+
+start_phone() {
+  local phone_key="$1"
+
+  if [[ -z "${PHONES[${phone_key}]:-}" ]]; then
+    logFatal "Unknown phone: ${phone_key}"
+  fi
+
+  # Parse phone configuration
+  IFS='|' read -r phone_name phone_dns phone_port phone_serial default_orientation <<<"${PHONES[${phone_key}]}"
+
+  # Use specified orientation or default
+  local orientation="${OPT_ORIENTATION:-${default_orientation}}"
+
+  logInfo "Connecting to ${phone_name}..."
+
+  # Connect via ADB
+  if [[ -n "${phone_serial}" ]]; then
+    # shellcheck disable=SC2310 # adb_connect intentionally used in condition for error handling
+    if ! adb_connect "${phone_name}" "${phone_dns}" "${phone_port}" "${phone_serial}"; then
+      logFatal "Failed to connect to ${phone_name}"
+    fi
+  else
+    # shellcheck disable=SC2310 # adb_connect intentionally used in condition for error handling
+    if ! adb_connect "${phone_name}" "${phone_dns}" "${phone_port}"; then
+      logFatal "Failed to connect to ${phone_name}"
+    fi
+  fi
+
+  # Build scrcpy arguments
+  local scrcpy_args=(
+    --max-size="${OPT_MAX_SIZE}"
+    --video-bit-rate="${OPT_BITRATE}"
+    --max-fps="${OPT_FPS}"
+  )
+
+  if [[ -n "${orientation}" && "${orientation}" != "0" ]]; then
+    scrcpy_args+=(--display-orientation="${orientation}")
+  fi
+
+  if ${OPT_NO_AUDIO}; then
+    scrcpy_args+=(--no-audio)
+  fi
+
+  # Start scrcpy
+  scrcpy_start "${phone_name}" "${phone_dns}:${phone_port}" "${scrcpy_args[@]}"
+}
+
+main() {
+  # Parse arguments (sets globals)
+  parse_args "$@"
+
+  # Dispatch to appropriate command
+  case "${COMMAND}" in
+  start)
+    # Select phone if not already specified
+    if [[ -z "${SELECTED_PHONE}" ]]; then
+      select_phone_interactive
+    fi
+
+    # Connect to selected phone
+    start_phone "${SELECTED_PHONE}"
+    ;;
+  stop)
+    stop_devices
+    ;;
+  list)
+    list_phones
+    ;;
+  status)
+    show_status
+    ;;
+  *)
+    logFatal "Unknown command: ${COMMAND}"
+    ;;
+  esac
+}
+
+###########################
+###### Startup logic ######
+###########################
+
+# Get directory of this script
+PH_SOURCE=${BASH_SOURCE[0]}
+while [[ -L "${PH_SOURCE}" ]]; do
+  PH_ROOT=$(cd -P "$(dirname "${PH_SOURCE}")" >/dev/null 2>&1 && pwd)
+  PH_SOURCE=$(readlink "${PH_SOURCE}")
+  [[ ${PH_SOURCE} != /* ]] && PH_SOURCE=${PH_ROOT}/${PH_SOURCE}
+done
+PH_ROOT=$(cd -P "$(dirname "${PH_SOURCE}")" >/dev/null 2>&1 && pwd)
+PH_ROOT=$(realpath "${PH_ROOT}/..")
+
+# Determine BPKG's global prefix
+if [[ -z "${PREFIX:-}" ]]; then
+  if [[ $(id -u || true) -eq 0 ]]; then
+    PREFIX="/usr/local"
+  else
+    PREFIX="${HOME}/.local"
+  fi
+fi
+
+# Import dependencies
+# shellcheck disable=SC1091 # Library paths are dynamically determined at runtime
+if ! source "${PREFIX}/lib/slf4.sh"; then
+  echo "Failed to import slf4.sh"
+  exit 1
+elif ! source "${PH_ROOT}/external/setup/src/android.sh"; then
+  echo "Failed to import android.sh"
+  exit 1
+fi
+
+if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
+  # This script was piped
+  logFatal "This script cannot be piped"
+elif [[ ${BASH_SOURCE[0]} != "${0}" ]]; then
+  # This script was sourced
+  logFatal "This script cannot be sourced"
+else
+  # This script was executed
+  main "$@"
+  exit $?
+fi

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
+# Monitor USB-C Power Delivery diagnostics in real-time
+# Note: Update the device path (USBC000:004) to match your system
+
+set -euo pipefail
+
+# shellcheck disable=SC2016 # Single quotes intentional - variables evaluated by watch on each iteration
+watch -n 1 'v=$(cat /sys/class/power_supply/ucsi-source-psy-USBC000:004/voltage_now); \
+c=$(cat /sys/class/power_supply/ucsi-source-psy-USBC000:004/current_now); \
+echo "Scale: µV / µA"; \
+echo "Voltage: $((v/1000000)).$(((v%1000000)/100000)) V"; \
+echo "Current: $((c/1000000)).$(((c%1000000)/100000)) A"; \
+echo "Power: $((v*c/1000000/1000000)) W"'

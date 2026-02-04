@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
+# Extract GPS data from dashcam MP4 files and merge into a single cleaned GPX file
+
+set -euo pipefail
+
+############################################
+## Configuration
+############################################
+
+GPX_TOOL="${HOME}/.local/bin/nvtk_mp42gpx.py"
+INPUT_DIR="/mnt/tb/Viofo_virtual"
+OUTPUT_GPX="/mnt/tb/Viofo_virtual/merged_dashcam.gpx"
+CLEANED_GPX="/mnt/tb/Viofo_virtual/merged_dashcam_cleaned.gpx"
+
+############################################
+## Functions
+############################################
+
+main() {
+  # Validate dependencies
+  if [[ ! -f "${GPX_TOOL}" ]]; then
+    logFatal "GPX tool not found: ${GPX_TOOL}"
+  fi
+
+  if [[ ! -d "${INPUT_DIR}" ]]; then
+    logFatal "Input directory not found: ${INPUT_DIR}"
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    logFatal "python3 is not installed"
+  fi
+
+  # Remove old cleaned file
+  logInfo "Removing old cleaned file"
+  rm -f "${CLEANED_GPX}"
+
+  # Generate merged GPX
+  logInfo "Generating merged GPX from all MP4 files in ${INPUT_DIR}..."
+  if ! "${GPX_TOOL}" -i "${INPUT_DIR}" -e -f -o "${OUTPUT_GPX}"; then
+    logFatal "Failed to generate GPX file"
+  fi
+
+  # Clean GPX file
+  logInfo "Cleaning GPX to remove invalid (0.0, 0.0) points..."
+  python3 <<EOF
+import gpxpy
+
+with open("${OUTPUT_GPX}", "r") as f:
+    gpx = gpxpy.parse(f)
+
+for track in gpx.tracks:
+    for segment in track.segments:
+        segment.points = [pt for pt in segment.points if (pt.latitude != 0.0 or pt.longitude != 0.0)]
+
+gpx.waypoints = [wp for wp in gpx.waypoints if (wp.latitude != 0.0 or wp.longitude != 0.0)]
+
+with open("${CLEANED_GPX}", "w") as f:
+    f.write(gpx.to_xml())
+
+print("Cleaned GPX saved to: ${CLEANED_GPX}")
+EOF
+
+  # shellcheck disable=SC2181 # Checking $? after heredoc to avoid shfmt formatting issues
+  if [[ $? -eq 0 ]]; then
+    logInfo "All done! Cleaned GPX saved to: ${CLEANED_GPX}"
+  else
+    logFatal "Failed to clean GPX file"
+  fi
+}
+
+###########################
+###### Startup logic ######
+###########################
+
+# Get directory of this script
+GE_SOURCE=${BASH_SOURCE[0]}
+while [[ -L "${GE_SOURCE}" ]]; do
+  GE_ROOT=$(cd -P "$(dirname "${GE_SOURCE}")" >/dev/null 2>&1 && pwd)
+  GE_SOURCE=$(readlink "${GE_SOURCE}")
+  [[ ${GE_SOURCE} != /* ]] && GE_SOURCE=${GE_ROOT}/${GE_SOURCE}
+done
+GE_ROOT=$(cd -P "$(dirname "${GE_SOURCE}")" >/dev/null 2>&1 && pwd)
+GE_ROOT=$(realpath "${GE_ROOT}/..")
+
+# Determine BPKG's global prefix
+if [[ -z "${PREFIX:-}" ]]; then
+  if [[ $(id -u || true) -eq 0 ]]; then
+    PREFIX="/usr/local"
+  else
+    PREFIX="${HOME}/.local"
+  fi
+fi
+
+# Import dependencies
+# shellcheck disable=SC1091 # Library paths are dynamically determined at runtime
+if ! source "${PREFIX}/lib/slf4.sh"; then
+  echo "Failed to import slf4.sh"
+  exit 1
+fi
+
+if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
+  # This script was piped
+  logFatal "This script cannot be piped"
+elif [[ ${BASH_SOURCE[0]} != "${0}" ]]; then
+  # This script was sourced
+  logFatal "This script cannot be sourced"
+else
+  # This script was executed
+  main "$@"
+  exit $?
+fi

@@ -79,6 +79,36 @@ setup_dev() {
     return 1
   fi
 
+  # Install Android development tools
+  if ! android_install; then
+    logError "Failed to install Android development tools"
+    return 1
+  fi
+
+  # Install VS Code
+  if ! vscode_install; then
+    logError "Failed to install VS Code"
+    return 1
+  fi
+
+  # Install Librewolf
+  if ! librewolf_install; then
+    logError "Failed to install Librewolf"
+    return 1
+  fi
+
+  # Configure Librewolf for multi-profiles and Firefox Sync
+  if ! librewolf_configure; then
+    logError "Failed to configure Librewolf"
+    return 1
+  fi
+
+  # Install baal tools globally
+  if ! install_tools; then
+    logError "Failed to install baal tools"
+    return 1
+  fi
+
   logInfo "Dev environment setup successfully"
   return 0
 }
@@ -100,6 +130,20 @@ setup_dependencies() {
     return 1
   fi
 
+  # Install and configure encryption tools
+  if ! sops_install; then
+    logInfo "Failed to install sops"
+    return 1
+  fi
+  if ! age_install; then
+    logInfo "Failed to install age"
+    return 1
+  fi
+  if ! age_configure "${AGE_KEY}"; then
+    logInfo "Failed to configure age"
+    return 1
+  fi
+
   return 0
 }
 
@@ -118,7 +162,141 @@ setup_host() {
     return 1
   fi
 
+  # Mount local drives
+  if ! mount_tb_nvme0n1p1; then
+    logError "Failed to mount TB drive"
+    return 1
+  fi
+
+  # Mount network drives
+  if ! mount_network_drives; then
+    logError "Failed to mount network drives"
+    return 1
+  fi
+
   # Add additional host configuration here
+
+  return 0
+}
+
+mount_tb_nvme0n1p1() {
+  local device="/dev/nvme0n1p1"
+  local mount_point="/mnt/tb"
+  local uuid
+
+  # Check device exists
+  if [[ ! -b ${device} ]]; then
+    logWarn "Device ${device} not found, skipping"
+    return 0
+  fi
+
+  logInfo "Configuring ${device} to mount at ${mount_point}"
+
+  # Create mount point
+  if [[ ! -d ${mount_point} ]]; then
+    if ! sudo mkdir -p "${mount_point}"; then
+      logError "Failed to create mount point ${mount_point}"
+      return 1
+    fi
+  fi
+
+  # Get UUID
+  uuid=$(sudo blkid -s UUID -o value "${device}")
+  if [[ -z ${uuid} ]]; then
+    logError "Failed to get UUID of ${device}"
+    return 1
+  fi
+
+  # Get current user info
+  local uid gid
+  uid=$(id -u "${SUDO_USER:-${USER}}")
+  gid=$(id -g "${SUDO_USER:-${USER}}")
+
+  # Remove any previous entry for the device in fstab
+  sudo sed -i "\|${mount_point}|d" /etc/fstab
+
+  # Add fstab entry
+  local fstab_entry="UUID=${uuid} ${mount_point} ext4 defaults,uid=${uid},gid=${gid} 0 2"
+  echo "${fstab_entry}" | sudo tee -a /etc/fstab >/dev/null
+
+  # Mount it
+  if ! sudo mount "${mount_point}"; then
+    logError "Failed to mount ${mount_point}"
+    return 1
+  fi
+
+  # Set ownership
+  if ! sudo chown "${SUDO_USER:-${USER}}:${SUDO_USER:-${USER}}" "${mount_point}"; then
+    logError "Failed to set ownership of ${mount_point}"
+    return 1
+  fi
+
+  logInfo "Partition ${device} mounted at ${mount_point}"
+  return 0
+}
+
+mount_network_drives() {
+  logInfo "Configuring network drives..."
+
+  # shellcheck disable=SC2154 # SMB_PASSWORD is loaded via config_load
+  add_or_update_smb_mount "//nas.sonia.jeremfg.com/Data/Group/Family" "/mnt/Sonia-Family" "Jeremie" "${SMB_PASSWORD}" "SOL"
+  add_or_update_smb_mount "//nas.sonia.jeremfg.com/Data/Public" "/mnt/Sonia-Public" "Jeremie" "${SMB_PASSWORD}" "SOL"
+  add_or_update_smb_mount "//nas.sonia.jeremfg.com/Data/Vault/DemersUsers/Jeremie" "/mnt/Sonia-JeremieBackup" "Jeremie" "${SMB_PASSWORD}" "SOL"
+
+  add_or_update_smb_mount "//halley.demers.jeremfg.com/User/Jeremie" "/mnt/Demers-Jeremie" "Jeremie" "${SMB_PASSWORD}" "SOL"
+  add_or_update_smb_mount "//halley.demers.jeremfg.com/Group/Family" "/mnt/Demers-Family" "Jeremie" "${SMB_PASSWORD}" "SOL"
+  add_or_update_smb_mount "//halley.demers.jeremfg.com/Public" "/mnt/Demers-Public" "Jeremie" "${SMB_PASSWORD}" "SOL"
+
+  sudo systemctl daemon-reload
+  if ! sudo mount -a; then
+    logWarn "Some network mounts may have failed"
+  fi
+
+  logInfo "Network drives configured"
+  return 0
+}
+
+add_or_update_smb_mount() {
+  local remote_path="$1"
+  local mount_point="$2"
+  local username="$3"
+  local password="$4"
+  local domain="$5"
+  local options uid gid
+
+  # Validation
+  if [[ -z "${remote_path}" || -z "${mount_point}" || -z "${username}" || -z "${password}" ]]; then
+    logError "Missing parameters for SMB mount: ${remote_path}"
+    return 1
+  fi
+
+  # Create mount point
+  if [[ ! -d "${mount_point}" ]]; then
+    logInfo "Creating mount point: ${mount_point}"
+    if ! sudo mkdir -p "${mount_point}"; then
+      logError "Failed to create mount point ${mount_point}"
+      return 1
+    fi
+    sudo chown "${SUDO_USER:-${USER}}:${SUDO_USER:-${USER}}" "${mount_point}"
+  fi
+
+  # Build mount options
+  uid=$(id -u "${SUDO_USER:-${USER}}")
+  gid=$(id -g "${SUDO_USER:-${USER}}")
+  options="username=${username},password=${password}"
+  [[ -n "${domain}" ]] && options+=",domain=${domain}"
+  options+=",iocharset=utf8,uid=${uid},gid=${gid},nofail,x-systemd.automount"
+
+  local fstab_entry="${remote_path} ${mount_point} cifs ${options} 0 0"
+
+  # Remove old entries
+  if sudo grep -qE "^[[:space:]]*//.*[[:space:]]+${mount_point}[[:space:]]+cifs" /etc/fstab; then
+    logTrace "Cleaning old entries for ${mount_point}"
+    sudo sed -i "\|//.* ${mount_point} cifs .*|d" /etc/fstab
+  fi
+
+  logTrace "Adding fstab entry for ${mount_point}"
+  echo "${fstab_entry}" | sudo tee -a /etc/fstab >/dev/null
 
   return 0
 }
@@ -139,9 +317,55 @@ check_system() {
   return 1
 }
 
+install_tools() {
+  logInfo "Installing baal tools to ${PREFIX}/bin..."
+
+  # Ensure bin directory exists
+  if [[ ! -d "${PREFIX}/bin" ]]; then
+    logInfo "Creating ${PREFIX}/bin"
+    mkdir -p "${PREFIX}/bin"
+  fi
+
+  # Install all executable scripts from tool/
+  local tool_dir="${BAAL_ROOT}/tool"
+  local installed=0
+  local failed=0
+
+  for script in "${tool_dir}"/*; do
+    if [[ -f "${script}" && -x "${script}" ]]; then
+      local script_name
+      script_name=$(basename "${script}")
+      local target="${PREFIX}/bin/${script_name}"
+
+      logTrace "Installing ${script_name} to ${target}"
+      if ln -sf "${script}" "${target}"; then
+        ((installed++))
+      else
+        logError "Failed to install ${script_name}"
+        ((failed++))
+      fi
+    fi
+  done
+
+  logInfo "Installed ${installed} tools to ${PREFIX}/bin"
+
+  if [[ ${failed} -gt 0 ]]; then
+    logError "Failed to install ${failed} tools"
+    return 1
+  fi
+
+  # Ensure PREFIX/bin is in PATH
+  if [[ ":${PATH}:" != *":${PREFIX}/bin:"* ]]; then
+    logWarn "${PREFIX}/bin is not in PATH. Add it to your shell profile:"
+    logWarn "  export PATH=\"${PREFIX}/bin:\${PATH}\""
+  fi
+
+  return 0
+}
+
 external_depends() {
   if ! command -v bpkg &>/dev/null; then
-    # shellcheck disable=SC2312
+    # shellcheck disable=SC2312 # Piping curl to bash is intentional for bpkg installation
     if ! curl -sLo- https://get.bpkg.sh | bash; then
       echo "Failed to install bpkg"
       return 1
@@ -167,6 +391,7 @@ external_depends() {
 if [[ -z "${LEVEL_ALL}" ]]; then LEVEL_ALL=""; fi
 
 # Constants
+AGE_KEY="jeremfg"
 REBOOT_REQUIRED=0
 
 ###########################
@@ -202,7 +427,7 @@ fi
 export LOG_CONSOLE=1
 export LOG_LEVEL=0
 
-# shellcheck disable=SC1091
+# shellcheck disable=SC1091 # Library paths are dynamically determined at runtime
 if ! source "${PREFIX}/lib/slf4.sh"; then
   echo "Failed to import slf4.sh"
   exit 1
@@ -214,6 +439,10 @@ elif [[ -z "${SETUP_DIR}" ]]; then
   logFatal "SETUP_DIR is not set"
 elif ! source "${SETUP_DIR}/src/git.sh"; then
   logFatal "Failed to import git.sh"
+elif ! source "${SETUP_DIR}/src/sops.sh"; then
+  logFatal "Failed to import sops.sh"
+elif ! source "${SETUP_DIR}/src/age.sh"; then
+  logFatal "Failed to import age.sh"
 elif ! source "${SETUP_DIR}/src/hostname.sh"; then
   logFatal "Failed to import hostname.sh"
 elif ! source "${SETUP_DIR}/src/identity.sh"; then
@@ -224,6 +453,12 @@ elif ! source "${SETUP_DIR}/src/python.sh"; then
   logFatal "Failed to import python.sh"
 elif ! source "${SETUP_DIR}/src/docker.sh"; then
   logFatal "Failed to import docker.sh"
+elif ! source "${SETUP_DIR}/src/android.sh"; then
+  logFatal "Failed to import android.sh"
+elif ! source "${SETUP_DIR}/src/vscode.sh"; then
+  logFatal "Failed to import vscode.sh"
+elif ! source "${SETUP_DIR}/src/librewolf.sh"; then
+  logFatal "Failed to import librewolf.sh"
 fi
 
 if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then

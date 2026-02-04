@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
+# Mount or unmount Viofo dashcam footage as a union filesystem
+
+set -euo pipefail
+
+############################################
+## Configuration
+############################################
+
+VIOFO_SOURCE="/mnt/tb/Viofo/Movie"
+VIOFO_MOUNT="/mnt/tb/Viofo_virtual"
+MAX_WAIT=30
+
+############################################
+## Functions
+############################################
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [COMMAND]
+
+Mount or unmount Viofo dashcam footage as a union filesystem.
+
+COMMANDS:
+  mount      Mount the Viofo union filesystem (default)
+  unmount    Unmount the Viofo union filesystem
+  umount     Alias for unmount
+  status     Show mount status
+  -h, --help Display this help message
+
+EXAMPLES:
+  $(basename "$0")           # Mount the filesystem
+  $(basename "$0") mount     # Mount the filesystem
+  $(basename "$0") unmount   # Unmount the filesystem
+  $(basename "$0") status    # Check if mounted
+
+EOF
+}
+
+mount_viofo() {
+  # Wait until source directory exists
+  logInfo "Waiting for ${VIOFO_SOURCE} to be available..."
+  for i in $(seq 1 "${MAX_WAIT}"); do
+    if [[ -d "${VIOFO_SOURCE}" ]]; then
+      logInfo "Found ${VIOFO_SOURCE}"
+      break
+    fi
+
+    if [[ "${i}" -eq "${MAX_WAIT}" ]]; then
+      logFatal "${VIOFO_SOURCE} not found after ${MAX_WAIT} seconds"
+    fi
+
+    sleep 1
+  done
+
+  # Check if unionfs-fuse is available
+  if ! command -v unionfs-fuse >/dev/null 2>&1; then
+    logFatal "unionfs-fuse is not installed"
+  fi
+
+  # Create mount point if it doesn't exist
+  if [[ ! -d "${VIOFO_MOUNT}" ]]; then
+    logInfo "Creating mount point ${VIOFO_MOUNT}"
+    mkdir -p "${VIOFO_MOUNT}"
+  fi
+
+  # Mount the union if not already mounted
+  if mount | grep -q "${VIOFO_MOUNT}"; then
+    logInfo "${VIOFO_MOUNT} is already mounted"
+  else
+    logInfo "Mounting unionfs at ${VIOFO_MOUNT}"
+    unionfs-fuse -o cow "${VIOFO_SOURCE}=RW:${VIOFO_SOURCE}/RO=RO:${VIOFO_SOURCE}/Parking=RO" "${VIOFO_MOUNT}"
+    logInfo "Successfully mounted ${VIOFO_MOUNT}"
+  fi
+}
+
+unmount_viofo() {
+  # Check if mounted before attempting to unmount
+  if mount | grep -q "${VIOFO_MOUNT}"; then
+    logInfo "Unmounting ${VIOFO_MOUNT}"
+    if fusermount -u "${VIOFO_MOUNT}"; then
+      logInfo "Successfully unmounted ${VIOFO_MOUNT}"
+    else
+      logError "Failed to unmount ${VIOFO_MOUNT}"
+      return 1
+    fi
+  else
+    logInfo "${VIOFO_MOUNT} is not currently mounted"
+  fi
+}
+
+status_viofo() {
+  if mount | grep -q "${VIOFO_MOUNT}"; then
+    logInfo "${VIOFO_MOUNT} is mounted"
+    mount | grep "${VIOFO_MOUNT}"
+    return 0
+  else
+    logInfo "${VIOFO_MOUNT} is not mounted"
+    return 1
+  fi
+}
+
+main() {
+  local command="${1:-mount}"
+
+  case "${command}" in
+  mount)
+    mount_viofo
+    ;;
+  unmount | umount)
+    unmount_viofo
+    ;;
+  status)
+    status_viofo
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    logError "Unknown command: ${command}"
+    usage
+    exit 1
+    ;;
+  esac
+}
+
+###########################
+###### Startup logic ######
+###########################
+
+# Get directory of this script
+VF_SOURCE=${BASH_SOURCE[0]}
+while [[ -L "${VF_SOURCE}" ]]; do
+  VF_ROOT=$(cd -P "$(dirname "${VF_SOURCE}")" >/dev/null 2>&1 && pwd)
+  VF_SOURCE=$(readlink "${VF_SOURCE}")
+  [[ ${VF_SOURCE} != /* ]] && VF_SOURCE=${VF_ROOT}/${VF_SOURCE}
+done
+VF_ROOT=$(cd -P "$(dirname "${VF_SOURCE}")" >/dev/null 2>&1 && pwd)
+VF_ROOT=$(realpath "${VF_ROOT}/..")
+
+# Determine BPKG's global prefix
+if [[ -z "${PREFIX:-}" ]]; then
+  if [[ $(id -u || true) -eq 0 ]]; then
+    PREFIX="/usr/local"
+  else
+    PREFIX="${HOME}/.local"
+  fi
+fi
+
+# Import dependencies
+# shellcheck disable=SC1091 # Library paths are dynamically determined at runtime
+if ! source "${PREFIX}/lib/slf4.sh"; then
+  echo "Failed to import slf4.sh"
+  exit 1
+fi
+
+if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
+  # This script was piped
+  logFatal "This script cannot be piped"
+elif [[ ${BASH_SOURCE[0]} != "${0}" ]]; then
+  # This script was sourced
+  logFatal "This script cannot be sourced"
+else
+  # This script was executed
+  main "$@"
+  exit $?
+fi

@@ -1,0 +1,5 @@
+---
+# SOPS configuration for Ba'al repository
+# AGE encryption for sensitive configuration files
+creation_rules:
+  - age: age1INSERT_YOUR_PUBLIC_KEY_HERE

@@ -18,5 +18,4 @@ wget -qO- 'https://raw.githubusercontent.com/jeremfg/setup/refs/heads/main/src/s
 
 ## TODO
 
-- [ ] Add local dangling tools
 - [ ] Tool for archiving emails
