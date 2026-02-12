@@ -3,6 +3,7 @@
     "timonwong.shellcheck",
     "foxundermoon.shell-format",
     "editorconfig.editorconfig",
-    "mads-hartmann.bash-ide-vscode"
+    "mads-hartmann.bash-ide-vscode",
+    "signageos.signageos-vscode-sops"
   ]
 }
