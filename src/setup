@@ -364,11 +364,21 @@ install_tools() {
 }
 
 external_depends() {
+  # Make sure bpkg is installed for managing bash dependencies
   if ! command -v bpkg &>/dev/null; then
     # shellcheck disable=SC2312 # Piping curl to bash is intentional for bpkg installation
     if ! curl -sLo- https://get.bpkg.sh | bash; then
       echo "Failed to install bpkg"
       return 1
+    fi
+  fi
+
+  # Determine BPKG's global prefix
+  if [[ -z "${PREFIX}" ]]; then
+    if [[ $(id -u || true) -eq 0 ]]; then
+      PREFIX="/usr/local"
+    else
+      PREFIX="${HOME}/.local"
     fi
   fi
 
@@ -385,13 +395,52 @@ external_depends() {
       return 1
     fi
   fi
+
+  # shellcheck disable=SC1091 # Library paths are dynamically determined at runtime
+  if ! source "${PREFIX}/lib/slf4.sh"; then
+    echo "Failed to import slf4.sh"
+    exit 1
+  elif ! source "${PREFIX}/lib/config.sh"; then
+    logFatal "Failed to import config.sh"
+  fi
+}
+
+internal_depends() {
+  # shellcheck disable=SC1091 # Internal setup scripts are in a runtime-determined path
+  if ! config_load "${BAAL_ROOT}/.config/local.env"; then
+    logFatal "Failed to load local.env"
+  elif [[ -z "${SETUP_DIR}" ]]; then
+    logFatal "SETUP_DIR is not set"
+  elif ! source "${SETUP_DIR}/src/git.sh"; then
+    logFatal "Failed to import git.sh"
+  elif ! source "${SETUP_DIR}/src/sops.sh"; then
+    logFatal "Failed to import sops.sh"
+  elif ! source "${SETUP_DIR}/src/age.sh"; then
+    logFatal "Failed to import age.sh"
+  elif ! source "${SETUP_DIR}/src/hostname.sh"; then
+    logFatal "Failed to import hostname.sh"
+  elif ! source "${SETUP_DIR}/src/identity.sh"; then
+    logFatal "Failed to import identity"
+  elif ! source "${SETUP_DIR}/src/pkg.sh"; then
+    logFatal "Failed to import pkg.sh"
+  elif ! source "${SETUP_DIR}/src/python.sh"; then
+    logFatal "Failed to import python.sh"
+  elif ! source "${SETUP_DIR}/src/docker.sh"; then
+    logFatal "Failed to import docker.sh"
+  elif ! source "${SETUP_DIR}/src/android.sh"; then
+    logFatal "Failed to import android.sh"
+  elif ! source "${SETUP_DIR}/src/vscode.sh"; then
+    logFatal "Failed to import vscode.sh"
+  elif ! source "${SETUP_DIR}/src/librewolf.sh"; then
+    logFatal "Failed to import librewolf.sh"
+  fi
 }
 
 # Variables loaded externally
 if [[ -z "${LEVEL_ALL}" ]]; then LEVEL_ALL=""; fi
 
 # Constants
-AGE_KEY="jeremfg"
+AGE_KEY="baal"
 REBOOT_REQUIRED=0
 
 ###########################
@@ -409,62 +458,20 @@ done
 BAAL_ROOT=$(cd -P "$(dirname "${BAAL_SOURCE}")" >/dev/null 2>&1 && pwd)
 BAAL_ROOT=$(realpath "${BAAL_ROOT}/..")
 
-# Determine BPKG's global prefix
-if [[ -z "${PREFIX}" ]]; then
-  if [[ $(id -u || true) -eq 0 ]]; then
-    PREFIX="/usr/local"
-  else
-    PREFIX="${HOME}/.local"
-  fi
-fi
-
-# Install external dependencies
-if ! external_depends; then
-  exit 1
-fi
-
 # Configure logger
 export LOG_CONSOLE=1
 export LOG_LEVEL=0
 
-# shellcheck disable=SC1091 # Library paths are dynamically determined at runtime
-if ! source "${PREFIX}/lib/slf4.sh"; then
-  echo "Failed to import slf4.sh"
+# Install external dependencies
+if ! external_depends; then
   exit 1
-elif ! source "${PREFIX}/lib/config.sh"; then
-  logFatal "Failed to import config.sh"
-elif ! config_load "${BAAL_ROOT}/.config/local.env"; then
-  logFatal "Failed to load local.env"
-elif [[ -z "${SETUP_DIR}" ]]; then
-  logFatal "SETUP_DIR is not set"
-elif ! source "${SETUP_DIR}/src/git.sh"; then
-  logFatal "Failed to import git.sh"
-elif ! source "${SETUP_DIR}/src/sops.sh"; then
-  logFatal "Failed to import sops.sh"
-elif ! source "${SETUP_DIR}/src/age.sh"; then
-  logFatal "Failed to import age.sh"
-elif ! source "${SETUP_DIR}/src/hostname.sh"; then
-  logFatal "Failed to import hostname.sh"
-elif ! source "${SETUP_DIR}/src/identity.sh"; then
-  logFatal "Failed to import identity"
-elif ! source "${SETUP_DIR}/src/pkg.sh"; then
-  logFatal "Failed to import pkg.sh"
-elif ! source "${SETUP_DIR}/src/python.sh"; then
-  logFatal "Failed to import python.sh"
-elif ! source "${SETUP_DIR}/src/docker.sh"; then
-  logFatal "Failed to import docker.sh"
-elif ! source "${SETUP_DIR}/src/android.sh"; then
-  logFatal "Failed to import android.sh"
-elif ! source "${SETUP_DIR}/src/vscode.sh"; then
-  logFatal "Failed to import vscode.sh"
-elif ! source "${SETUP_DIR}/src/librewolf.sh"; then
-  logFatal "Failed to import librewolf.sh"
+elif ! internal_depends; then
+  logFatal "Failed to load internal dependencies"
 fi
 
 if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
   # This script was piped
-  echo "ERROR: This script cannot be piped"
-  exit 1
+  logFatal "This script cannot be piped"
 elif [[ ${BASH_SOURCE[0]} != "${0}" ]]; then
   # This script was sourced
   logFatal "This script cannot be sourced"

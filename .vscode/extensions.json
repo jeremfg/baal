@@ -2,6 +2,7 @@
   "recommendations": [
     "timonwong.shellcheck",
     "foxundermoon.shell-format",
-    "editorconfig.editorconfig"
+    "editorconfig.editorconfig",
+    "mads-hartmann.bash-ide-vscode"
   ]
 }
