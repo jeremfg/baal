@@ -74,7 +74,7 @@ setup_dev() {
   fi
 
   # Install Docker Desktop
-  if ! docker_install; then
+  if ! docker_install "${BAAL_ROOT}/.config/local.env"; then
     logError "Failed to install Docker Desktop"
     return 1
   fi
@@ -183,6 +183,9 @@ mount_tb_nvme0n1p1() {
   local device="/dev/nvme0n1p1"
   local mount_point="/mnt/tb"
   local uuid
+  local desired_fstab_entry
+  local current_fstab_entry
+  local is_mounted=0
 
   # Check device exists
   if [[ ! -b ${device} ]]; then
@@ -212,17 +215,42 @@ mount_tb_nvme0n1p1() {
   uid=$(id -u "${SUDO_USER:-${USER}}")
   gid=$(id -g "${SUDO_USER:-${USER}}")
 
-  # Remove any previous entry for the device in fstab
-  sudo sed -i "\|${mount_point}|d" /etc/fstab
+  # Desired fstab entry
+  desired_fstab_entry="UUID=${uuid} ${mount_point} ext4 defaults,uid=${uid},gid=${gid} 0 2"
 
-  # Add fstab entry
-  local fstab_entry="UUID=${uuid} ${mount_point} ext4 defaults,uid=${uid},gid=${gid} 0 2"
-  echo "${fstab_entry}" | sudo tee -a /etc/fstab >/dev/null
+  # Check if already mounted
+  if mountpoint -q "${mount_point}"; then
+    is_mounted=1
+  fi
 
-  # Mount it
-  if ! sudo mount "${mount_point}"; then
-    logError "Failed to mount ${mount_point}"
-    return 1
+  # Read current fstab entry for this mount point (if any)
+  current_fstab_entry=$(sudo awk -v mp="${mount_point}" '$2 == mp {print}' /etc/fstab || true)
+  current_fstab_entry=$(echo "${current_fstab_entry}" | tail -n 1)
+
+  # Update fstab if needed
+  if [[ "${current_fstab_entry}" != "${desired_fstab_entry}" ]]; then
+    # Remove any previous entry for the mount point in fstab
+    sudo sed -i "\|[[:space:]]${mount_point}[[:space:]]|d" /etc/fstab
+    echo "${desired_fstab_entry}" | sudo tee -a /etc/fstab >/dev/null
+    logInfo "Updated fstab entry for ${mount_point}"
+
+    # Remount if it was already mounted
+    if [[ ${is_mounted} -eq 1 ]]; then
+      if ! sudo umount "${mount_point}"; then
+        logError "Failed to unmount ${mount_point} for remount"
+        return 1
+      else
+        is_mounted=0
+      fi
+    fi
+  fi
+
+  # Mount if not mounted
+  if [[ ${is_mounted} -eq 0 ]]; then
+    if ! sudo mount "${mount_point}"; then
+      logError "Failed to mount ${mount_point}"
+      return 1
+    fi
   fi
 
   # Set ownership
