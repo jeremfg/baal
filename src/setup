@@ -73,24 +73,6 @@ setup_dev() {
     return 1
   fi
 
-  # Install Docker Desktop
-  if ! docker_install "${BAAL_ROOT}/.config/local.env"; then
-    logError "Failed to install Docker Desktop"
-    return 1
-  fi
-
-  # Install Android development tools
-  if ! android_install; then
-    logError "Failed to install Android development tools"
-    return 1
-  fi
-
-  # Install VS Code
-  if ! vscode_install; then
-    logError "Failed to install VS Code"
-    return 1
-  fi
-
   # Install Librewolf
   if ! librewolf_install; then
     logError "Failed to install Librewolf"
@@ -103,9 +85,27 @@ setup_dev() {
     return 1
   fi
 
-  # Install baal tools globally
-  if ! install_tools; then
-    logError "Failed to install baal tools"
+  # Install Docker Desktop
+  if ! docker_install "${BAAL_ROOT}/.config/local.env"; then
+    logError "Failed to install Docker Desktop"
+    return 1
+  fi
+
+  # # Install VS Code
+  # if ! vscode_install; then
+  #   logError "Failed to install VS Code"
+  #   return 1
+  # fi
+
+  # # Install baal tools globally
+  # if ! install_tools; then
+  #   logError "Failed to install baal tools"
+  #   return 1
+  # fi
+
+  # Install Android development tools
+  if ! android_install; then
+    logError "Failed to install Android development tools"
     return 1
   fi
 
@@ -114,12 +114,6 @@ setup_dev() {
 }
 
 setup_dependencies() {
-  # Make sure the OS is up to date
-  if ! sudo apt-get update && sudo apt-get upgrade -y; then
-    logInfo "Failed to update"
-    return 1
-  fi
-
   # Make sure git is installed and configured
   if ! git_install; then
     logInfo "Failed to install git"
@@ -182,7 +176,7 @@ setup_host() {
 mount_tb_nvme0n1p1() {
   local device="/dev/nvme0n1p1"
   local mount_point="/mnt/tb"
-  local uuid
+  local uuid fs_type
   local desired_fstab_entry
   local current_fstab_entry
   local is_mounted=0
@@ -203,10 +197,15 @@ mount_tb_nvme0n1p1() {
     fi
   fi
 
-  # Get UUID
+  # Get UUID and filesystem type
   uuid=$(sudo blkid -s UUID -o value "${device}")
+  fs_type=$(sudo blkid -s TYPE -o value "${device}")
   if [[ -z ${uuid} ]]; then
     logError "Failed to get UUID of ${device}"
+    return 1
+  fi
+  if [[ -z ${fs_type} ]]; then
+    logError "Failed to get filesystem type of ${device}"
     return 1
   fi
 
@@ -216,7 +215,19 @@ mount_tb_nvme0n1p1() {
   gid=$(id -g "${SUDO_USER:-${USER}}")
 
   # Desired fstab entry
-  desired_fstab_entry="UUID=${uuid} ${mount_point} ext4 defaults,uid=${uid},gid=${gid} 0 2"
+  local mount_opts passno
+  case "${fs_type}" in
+  ext4)
+    mount_opts="defaults"
+    passno=2
+    ;;
+  *)
+    logError "Unsupported filesystem type for ${device}: ${fs_type}"
+    return 1
+    ;;
+  esac
+
+  desired_fstab_entry="UUID=${uuid} ${mount_point} ${fs_type} ${mount_opts} 0 ${passno}"
 
   # Check if already mounted
   if mountpoint -q "${mount_point}"; then
@@ -451,6 +462,8 @@ internal_depends() {
     logFatal "Failed to import identity"
   elif ! source "${SETUP_DIR}/src/pkg.sh"; then
     logFatal "Failed to import pkg.sh"
+  elif ! source "${SETUP_DIR}/src/extrepo.sh"; then
+    logFatal "Failed to import extrepo.sh"
   elif ! source "${SETUP_DIR}/src/python.sh"; then
     logFatal "Failed to import python.sh"
   elif ! source "${SETUP_DIR}/src/docker.sh"; then
