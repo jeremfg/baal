@@ -84,11 +84,11 @@ setup_dev() {
     return 1
   fi
 
-  # # Install VS Code
-  # if ! vscode_install; then
-  #   logError "Failed to install VS Code"
-  #   return 1
-  # fi
+  # Install VS Code
+  if ! vscode_install; then
+    logError "Failed to install VS Code"
+    return 1
+  fi
 
   logInfo "Dev environment setup successfully"
   return 0
