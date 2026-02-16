@@ -9,6 +9,7 @@ set -euo pipefail
 ## Configuration
 ############################################
 
+export LOG_CONSOLE=1
 DOMAIN="sonia.jeremfg.com"
 BACK_IP="38.133.38.85"
 DNS_SERVER="198.54.117.10"

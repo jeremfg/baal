@@ -9,6 +9,8 @@ set -euo pipefail
 ## Configuration
 ############################################
 
+export LOG_CONSOLE=1
+
 # Default scrcpy options
 DEFAULT_MAX_SIZE=1024
 DEFAULT_BITRATE="500K"
@@ -71,7 +73,7 @@ list_phones() {
   local i=1
   for key in "${!PHONES[@]}"; do
     IFS='|' read -r name _dns _port _serial _orientation <<<"${PHONES[${key}]}"
-    echo "  ${i}. ${name} (${key})"
+    echo "  ${i}. ${name}"
     ((i++))
   done
   echo
@@ -256,6 +258,14 @@ start_phone() {
     fi
   fi
 
+  local video_codec=""
+  local video_encoder=""
+  if [[ "${phone_key}" == "nexus4" ]]; then
+    OPT_NO_AUDIO=true
+    video_codec="h264"
+    video_encoder="OMX.google.h264.encoder"
+  fi
+
   # Build scrcpy arguments
   local scrcpy_args=(
     --max-size="${OPT_MAX_SIZE}"
@@ -271,7 +281,12 @@ start_phone() {
     scrcpy_args+=(--no-audio)
   fi
 
+  if [[ -n "${video_encoder}" ]]; then
+    scrcpy_args+=(--video-codec="${video_codec}" --video-encoder="${video_encoder}")
+  fi
+
   # Start scrcpy
+  logInfo "Starting scrcpy with: --serial ${phone_dns}:${phone_port} ${scrcpy_args[*]}"
   scrcpy_start "${phone_name}" "${phone_dns}:${phone_port}" "${scrcpy_args[@]}"
 }
 
