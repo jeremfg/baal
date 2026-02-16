@@ -333,9 +333,10 @@ fi
 if ! source "${PREFIX}/lib/slf4.sh"; then
   echo "Failed to import slf4.sh"
   exit 1
+elif ! source "${PH_ROOT}/external/setup/src/constants.sh"; then
+  logFatal "Failed to import constants.sh"
 elif ! source "${PH_ROOT}/external/setup/src/android.sh"; then
-  echo "Failed to import android.sh"
-  exit 1
+  logFatal "Failed to import android.sh"
 fi
 
 if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then

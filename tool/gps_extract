@@ -9,16 +9,21 @@ set -euo pipefail
 ## Configuration
 ############################################
 
-GPX_TOOL="${HOME}/.local/bin/nvtk_mp42gpx.py"
-INPUT_DIR="/mnt/tb/Viofo_virtual"
-OUTPUT_GPX="/mnt/tb/Viofo_virtual/merged_dashcam.gpx"
-CLEANED_GPX="/mnt/tb/Viofo_virtual/merged_dashcam_cleaned.gpx"
+VIOFO_VIRTUAL_DIR="/mnt/tb/Viofo_virtual"
+MERGED_GPX_FILE="${VIOFO_VIRTUAL_DIR}/merged_dashcam.gpx"
+CLEANED_GPX_FILE="${VIOFO_VIRTUAL_DIR}/merged_dashcam_cleaned.gpx"
 
 ############################################
 ## Functions
 ############################################
 
 main() {
+  # Initialize constants (depend on imported SETUP_*)
+  GPX_TOOL="${SETUP_LOCAL_BIN}/nvtk_mp42gpx.py"
+  INPUT_DIR="${VIOFO_VIRTUAL_DIR}"
+  OUTPUT_GPX="${MERGED_GPX_FILE}"
+  CLEANED_GPX="${CLEANED_GPX_FILE}"
+
   # Validate dependencies
   if [[ ! -f "${GPX_TOOL}" ]]; then
     logFatal "GPX tool not found: ${GPX_TOOL}"
@@ -98,6 +103,8 @@ fi
 if ! source "${PREFIX}/lib/slf4.sh"; then
   echo "Failed to import slf4.sh"
   exit 1
+elif ! source "${GE_ROOT}/external/setup/src/constants.sh"; then
+  logFatal "Failed to import constants.sh"
 fi
 
 if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then

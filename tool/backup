@@ -229,6 +229,8 @@ if ! source "${PREFIX}/lib/slf4.sh"; then
   exit 1
 elif ! source "${PREFIX}/lib/config.sh"; then
   logFatal "Failed to import config.sh"
+elif ! source "${BK_ROOT}/external/setup/src/constants.sh"; then
+  logFatal "Failed to import constants.sh"
 fi
 
 # Load configuration (config_load automatically handles SOPS decryption)

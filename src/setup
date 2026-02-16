@@ -5,6 +5,39 @@
 #
 # Currently tested on Linux Mint (Ubuntu-based)
 
+############################################
+## Configuration
+############################################
+
+# AGE encryption key name
+AGE_KEY="baal"
+
+# SMB credentials and authentication
+SMB_USER="Jeremie"
+SMB_DOMAIN="SOL"
+
+# Network mounts - Sonia NAS
+NAS_SONIA_HOST="nas.sonia.jeremfg.com"
+NAS_SONIA_FAMILY="//${NAS_SONIA_HOST}/Data/Group/Family"
+NAS_SONIA_PUBLIC="//${NAS_SONIA_HOST}/Data/Public"
+NAS_SONIA_BACKUP="//${NAS_SONIA_HOST}/Data/Vault/DemersUsers/Jeremie"
+MNT_SONIA_FAMILY="/mnt/Sonia-Family"
+MNT_SONIA_PUBLIC="/mnt/Sonia-Public"
+MNT_SONIA_BACKUP="/mnt/Sonia-JeremieBackup"
+
+# Network mounts - Halley server
+HALLEY_HOST="halley.demers.jeremfg.com"
+HALLEY_USER="//${HALLEY_HOST}/User/Jeremie"
+HALLEY_FAMILY="//${HALLEY_HOST}/Group/Family"
+HALLEY_PUBLIC="//${HALLEY_HOST}/Public"
+MNT_HALLEY_USER="/mnt/Demers-Jeremie"
+MNT_HALLEY_FAMILY="/mnt/Demers-Family"
+MNT_HALLEY_PUBLIC="/mnt/Demers-Public"
+
+############################################
+## Functions
+############################################
+
 setup() {
   if ! setup_dependencies; then
     logError "Failed to setup dependencies"
@@ -141,11 +174,11 @@ setup_base_software() {
     return 1
   fi
 
-  # # Install baal tools globally
-  # if ! install_tools; then
-  #   logError "Failed to install baal tools"
-  #   return 1
-  # fi
+  # Install baal tools globally
+  if ! install_tools; then
+    logError "Failed to install baal tools"
+    return 1
+  fi
 
   return 0
 }
@@ -287,13 +320,13 @@ mount_network_drives() {
   logInfo "Configuring network drives..."
 
   # shellcheck disable=SC2154 # SMB_PASSWORD is loaded via config_load
-  add_or_update_smb_mount "//nas.sonia.jeremfg.com/Data/Group/Family" "/mnt/Sonia-Family" "Jeremie" "${SMB_PASSWORD}" "SOL"
-  add_or_update_smb_mount "//nas.sonia.jeremfg.com/Data/Public" "/mnt/Sonia-Public" "Jeremie" "${SMB_PASSWORD}" "SOL"
-  add_or_update_smb_mount "//nas.sonia.jeremfg.com/Data/Vault/DemersUsers/Jeremie" "/mnt/Sonia-JeremieBackup" "Jeremie" "${SMB_PASSWORD}" "SOL"
+  add_or_update_smb_mount "${NAS_SONIA_FAMILY}" "${MNT_SONIA_FAMILY}" "${SMB_USER}" "${SMB_PASSWORD}" "${SMB_DOMAIN}"
+  add_or_update_smb_mount "${NAS_SONIA_PUBLIC}" "${MNT_SONIA_PUBLIC}" "${SMB_USER}" "${SMB_PASSWORD}" "${SMB_DOMAIN}"
+  add_or_update_smb_mount "${NAS_SONIA_BACKUP}" "${MNT_SONIA_BACKUP}" "${SMB_USER}" "${SMB_PASSWORD}" "${SMB_DOMAIN}"
 
-  add_or_update_smb_mount "//halley.demers.jeremfg.com/User/Jeremie" "/mnt/Demers-Jeremie" "Jeremie" "${SMB_PASSWORD}" "SOL"
-  add_or_update_smb_mount "//halley.demers.jeremfg.com/Group/Family" "/mnt/Demers-Family" "Jeremie" "${SMB_PASSWORD}" "SOL"
-  add_or_update_smb_mount "//halley.demers.jeremfg.com/Public" "/mnt/Demers-Public" "Jeremie" "${SMB_PASSWORD}" "SOL"
+  add_or_update_smb_mount "${HALLEY_USER}" "${MNT_HALLEY_USER}" "${SMB_USER}" "${SMB_PASSWORD}" "${SMB_DOMAIN}"
+  add_or_update_smb_mount "${HALLEY_FAMILY}" "${MNT_HALLEY_FAMILY}" "${SMB_USER}" "${SMB_PASSWORD}" "${SMB_DOMAIN}"
+  add_or_update_smb_mount "${HALLEY_PUBLIC}" "${MNT_HALLEY_PUBLIC}" "${SMB_USER}" "${SMB_PASSWORD}" "${SMB_DOMAIN}"
 
   sudo systemctl daemon-reload
   if ! sudo mount -a; then
@@ -366,12 +399,12 @@ check_system() {
 }
 
 install_tools() {
-  logInfo "Installing baal tools to ${PREFIX}/bin..."
+  logInfo "Installing baal tools to ${SETUP_LOCAL_BIN}..."
 
   # Ensure bin directory exists
-  if [[ ! -d "${PREFIX}/bin" ]]; then
-    logInfo "Creating ${PREFIX}/bin"
-    mkdir -p "${PREFIX}/bin"
+  if ! file_ensure_dir "${SETUP_LOCAL_BIN}"; then
+    logError "Failed to create ${SETUP_LOCAL_BIN}"
+    return 1
   fi
 
   # Install all executable scripts from tool/
@@ -383,10 +416,10 @@ install_tools() {
     if [[ -f "${script}" && -x "${script}" ]]; then
       local script_name
       script_name=$(basename "${script}")
-      local target="${PREFIX}/bin/${script_name}"
+      local target="${SETUP_LOCAL_BIN}/${script_name}"
 
       logTrace "Installing ${script_name} to ${target}"
-      if ln -sf "${script}" "${target}"; then
+      if file_symlink "${script}" "${target}"; then
         ((installed++))
       else
         logError "Failed to install ${script_name}"
@@ -395,17 +428,17 @@ install_tools() {
     fi
   done
 
-  logInfo "Installed ${installed} tools to ${PREFIX}/bin"
+  logInfo "Installed ${installed} tools to ${SETUP_LOCAL_BIN}"
 
   if [[ ${failed} -gt 0 ]]; then
     logError "Failed to install ${failed} tools"
     return 1
   fi
 
-  # Ensure PREFIX/bin is in PATH
-  if [[ ":${PATH}:" != *":${PREFIX}/bin:"* ]]; then
-    logWarn "${PREFIX}/bin is not in PATH. Add it to your shell profile:"
-    logWarn "  export PATH=\"${PREFIX}/bin:\${PATH}\""
+  # Ensure SETUP_LOCAL_BIN is in PATH
+  if [[ ":${PATH}:" != *":${SETUP_LOCAL_BIN}:"* ]]; then
+    logWarn "${SETUP_LOCAL_BIN} is not in PATH. Add it to your shell profile:"
+    logWarn "  export PATH=\"${SETUP_LOCAL_BIN}:\${PATH}\""
   fi
 
   return 0
@@ -459,6 +492,10 @@ internal_depends() {
     logFatal "Failed to load local.env"
   elif [[ -z "${SETUP_DIR}" ]]; then
     logFatal "SETUP_DIR is not set"
+  elif ! source "${SETUP_DIR}/src/constants.sh"; then
+    logFatal "Failed to import constants.sh"
+  elif ! source "${SETUP_DIR}/src/file.sh"; then
+    logFatal "Failed to import file.sh"
   elif ! source "${SETUP_DIR}/src/git.sh"; then
     logFatal "Failed to import git.sh"
   elif ! source "${SETUP_DIR}/src/sops.sh"; then
@@ -489,9 +526,17 @@ internal_depends() {
 # Variables loaded externally
 if [[ -z "${LEVEL_ALL}" ]]; then LEVEL_ALL=""; fi
 
-# Constants
-AGE_KEY="baal"
+# Reboot flag (set by functions during setup)
 REBOOT_REQUIRED=0
+
+#############################
+###### Local constants ######
+#############################
+
+# Default shared constants when sourced without constants.sh
+if [[ -z "${SETUP_LOCAL_BIN+x}" ]]; then
+  SETUP_LOCAL_BIN=""
+fi
 
 ###########################
 ###### Startup logic ######

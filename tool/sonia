@@ -11,7 +11,7 @@ set -euo pipefail
 
 DOMAIN="sonia.jeremfg.com"
 BACK_IP="38.133.38.85"
-DNS_SERVER="198.54.117.10" # Namecheap DNS
+DNS_SERVER="198.54.117.10"
 INTERVAL=5
 
 ############################################
@@ -77,6 +77,8 @@ fi
 if ! source "${PREFIX}/lib/slf4.sh"; then
   echo "Failed to import slf4.sh"
   exit 1
+elif ! source "${SN_ROOT}/external/setup/src/constants.sh"; then
+  logFatal "Failed to import constants.sh"
 fi
 
 if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
