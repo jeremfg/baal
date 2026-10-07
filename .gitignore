@@ -4,5 +4,5 @@
 .log/
 
 # Locally installed files
-bin/
-downloads/
+.bin/
+.download/

@@ -39,8 +39,16 @@ MNT_HALLEY_PUBLIC="/mnt/Demers-Public"
 ############################################
 
 setup() {
-  if ! setup_dependencies; then
+
+  # Dependencies
+  if ! internal_depends; then
+    logError "Failed to load internal dependencies"
+    return 1
+  elif ! setup_dependencies; then
     logError "Failed to setup dependencies"
+    return 1
+  elif ! config_load "${BAAL_ROOT}/.config/local.env"; then
+    logError "Failed to load local.env"
     return 1
   fi
 
@@ -77,39 +85,39 @@ setup_dev() {
   fi
 
   # Install python and pip
-  if ! python_install; then
-    logError "Failed to install python"
-    return 1
-  fi
+  #if ! python_install; then
+  #  logError "Failed to install python"
+  #  return 1
+  #fi
 
   # Install nodejs to avoid nodeenv issues with pre-commit
-  if ! pkg_install nodejs npm; then
-    logError "Failed to install nodejs"
-    return 1
-  fi
+  #if ! pkg_install nodejs npm; then
+  #  logError "Failed to install nodejs"
+  #  return 1
+  #fi
 
   # Install pre-commit
-  if ! pkg_install pre-commit; then
-    logError "Failed to install pre-commit"
-    return 1
-  fi
+  #if ! pkg_install pre-commit; then
+  #  logError "Failed to install pre-commit"
+  #  return 1
+  #fi
 
   # Check if pre-commit is already installed
-  if [[ ! -f "${BAAL_ROOT}/.git/hooks/pre-commit" ]]; then
-    logInfo "Configuring pre-commit..."
-    pushd "${BAAL_ROOT}" &>/dev/null || return 1
-    if ! pre-commit install; then
-      logError "Failed to configure pre-commit"
-      return 1
-    fi
-    popd &>/dev/null || return 1
-  fi
+  #if [[ ! -f "${BAAL_ROOT}/.git/hooks/pre-commit" ]]; then
+  #  logInfo "Configuring pre-commit..."
+  #  pushd "${BAAL_ROOT}" &>/dev/null || return 1
+  #  if ! pre-commit install; then
+  #    logError "Failed to configure pre-commit"
+  #    return 1
+  #  fi
+  #  popd &>/dev/null || return 1
+  #fi
 
   # Install shellcheck
-  if ! pkg_install shellcheck; then
-    logError "Failed to install shellcheck"
-    return 1
-  fi
+  #if ! pkg_install shellcheck; then
+  #  logError "Failed to install shellcheck"
+  #  return 1
+  #fi
 
   # Install Docker Desktop
   if ! docker_install "${BAAL_ROOT}/.config/local.env"; then
@@ -199,16 +207,16 @@ setup_host() {
   fi
 
   # Mount local drives
-  if ! mount_tb_nvme0n1p1; then
-    logError "Failed to mount TB drive"
-    return 1
-  fi
+  #if ! mount_tb_nvme0n1p1; then
+  #  logError "Failed to mount TB drive"
+  #  return 1
+  #fi
 
   # Mount network drives
-  if ! mount_network_drives; then
-    logError "Failed to mount network drives"
-    return 1
-  fi
+  #if ! mount_network_drives; then
+  #  logError "Failed to mount network drives"
+  #  return 1
+  #fi
 
   # Add additional host configuration here
 
@@ -448,8 +456,18 @@ external_depends() {
   # Make sure bpkg is installed for managing bash dependencies
   if ! command -v bpkg &>/dev/null; then
     # shellcheck disable=SC2312 # Piping curl to bash is intentional for bpkg installation
-    if ! curl -sLo- https://get.bpkg.sh | bash; then
+    if ! wget -qO- https://get.bpkg.sh | bash; then
       echo "Failed to install bpkg"
+      return 1
+    else
+      source ~/.profile
+    fi
+  fi
+  
+  # bpkg needs CURL
+  if ! command -v curl &>/dev/null; then
+    if ! sudo apt install curl; then
+      logError "Failed to install git"
       return 1
     fi
   fi
@@ -488,9 +506,7 @@ external_depends() {
 
 internal_depends() {
   # shellcheck disable=SC1091 # Internal setup scripts are in a runtime-determined path
-  if ! config_load "${BAAL_ROOT}/.config/local.env"; then
-    logFatal "Failed to load local.env"
-  elif [[ -z "${SETUP_DIR}" ]]; then
+  if [[ -z "${SETUP_DIR}" ]]; then
     logFatal "SETUP_DIR is not set"
   elif ! source "${SETUP_DIR}/src/constants.sh"; then
     logFatal "Failed to import constants.sh"
@@ -557,11 +573,14 @@ BAAL_ROOT=$(realpath "${BAAL_ROOT}/..")
 export LOG_CONSOLE=1
 export LOG_LEVEL=0
 
+SETUP_DIR="${BAAL_ROOT}/external/setup"
+DOWNLOAD_DIR="${BAAL_ROOT}/.download"
+CONFIG_DIR="${BAAL_ROOT}/.config"
+BIN_DIR="${BAAL_ROOT}/.bin"
+
 # Install external dependencies
 if ! external_depends; then
   exit 1
-elif ! internal_depends; then
-  logFatal "Failed to load internal dependencies"
 fi
 
 if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
